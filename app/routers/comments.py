@@ -3,7 +3,7 @@ Endpoints de comentarios y aviso en tiempo real al autor del post.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
 from app.dependencies import (
     get_comment_service,
@@ -12,10 +12,9 @@ from app.dependencies import (
     pagination,
 )
 from app.models import Comment, User
-from app.realtime import manager
 from app.schemas.comment import CommentCreate, CommentResponse, CommentUpdate
-from app.schemas.notification import NotificationResponse
 from app.services.comment_service import CommentService
+from app.tasks import push_notification, send_comment_email
 
 router = APIRouter(tags=["comments"])
 
@@ -52,20 +51,18 @@ async def list_comments(
 async def create_comment(
     post_id: int,
     data: CommentCreate,
+    background_tasks: BackgroundTasks,
     service: CommentService = Depends(get_comment_service),
     current_user: User = Depends(get_current_user),
 ) -> Comment:
+    """Agrega un comentario a tu nombre. Si el post es de otro, su autor recibe un aviso."""
     comment, notification = await service.create(post_id, data, current_user)
+    # El aviso y el email, DESPUÉS de responder: el que comenta no los espera.
+    # Se pasa el id, no el objeto: cada tarea abre su propia sesión y lo vuelve a leer.
     if notification is not None:
-        await manager.send_to_user(
-            notification.user_id,
-            {
-                "type": "notification",
-                "data": NotificationResponse.model_validate(notification).model_dump(
-                    mode="json"
-                ),
-            },
-        )
+        # Primero el WebSocket (rápido), después el email (lento): corren en ese orden
+        background_tasks.add_task(push_notification, notification.id)
+        background_tasks.add_task(send_comment_email, notification.id)
     return comment
 
 

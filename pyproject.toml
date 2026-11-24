@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 # Lo que necesita la app: Alembic, el driver async, FastAPI, bcrypt (pwdlib),
 # la configuración en .env (pydantic-settings), los JWT (pyjwt) y SQLAlchemy 2.0
 dependencies = [
+    "aiofiles>=25.1.0",
     "alembic>=1.20.0",
     "asyncpg>=0.31.0",
     "fastapi[standard]>=0.141.1",

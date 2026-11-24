@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import settings
 from app.exceptions import PulseError, raise_duplicate
-from app.models import UserRole
+from app.models import User, UserRole
 from app.repositories.refresh_token_repo import RefreshTokenRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.auth import Token
@@ -36,13 +36,13 @@ class AuthService:
         self.users = users
         self.refresh_tokens = refresh_tokens
 
-    async def register(self, data: UserRegister) -> None:
+    async def register(self, data: UserRegister) -> User:
         if await self.users.get_by_email(str(data.email)):
             raise PulseError(409, "Email already registered")
         if await self.users.get_by_username(data.username):
             raise PulseError(409, "Username already taken")
         try:
-            await self.users.create(
+            user = await self.users.create(
                 username=data.username,
                 email=str(data.email),
                 hashed_password=hash_password(data.password),
@@ -52,6 +52,7 @@ class AuthService:
         except IntegrityError as exc:
             await self.users.db.rollback()
             raise raise_duplicate(str(exc.orig)) from exc
+        return user
 
     async def login(self, email: str, password: str) -> Token:
         user = await self.users.get_by_email(email)

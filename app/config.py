@@ -1,6 +1,8 @@
 """app/config.py
 Configuración central con pydantic-settings: lee .env y valida los valores.
 """
+from pathlib import Path
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,6 +25,13 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Las background tasks (Week 10). Los archivos van en var/, que git ignora.
+    # El "email" es simulado: tarda EMAIL_DELAY_SECONDS y se escribe en outbox.log
+    email_delay_seconds: float = 2.0
+    outbox_path: Path = Path("var/outbox.log")
+    # Los eventos de analytics, una línea JSON por evento
+    analytics_path: Path = Path("var/analytics.log")
 
     @field_validator("DATABASE_URL")
     @classmethod

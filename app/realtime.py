@@ -24,18 +24,22 @@ class ConnectionManager:
         if not connections:
             self.active.pop(user_id, None)
 
-    def count(self, user_id: int) -> int:
+    def count(self, user_id: int | None = None) -> int:
+        if user_id is None:
+            return sum(len(connections) for connections in self.active.values())
         return len(self.active.get(user_id, ()))
 
-    async def send_to_user(self, user_id: int, message: dict[str, object]) -> None:
+    async def send_to_user(self, user_id: int, message: dict[str, object]) -> int:
         dead: list[WebSocket] = []
-        for websocket in list(self.active.get(user_id, ())):
+        connections = list(self.active.get(user_id, ()))
+        for websocket in connections:
             try:
                 await websocket.send_json(message)
             except Exception:
                 dead.append(websocket)
         for websocket in dead:
             self.disconnect(user_id, websocket)
+        return len(connections) - len(dead)
 
 
 manager = ConnectionManager()
