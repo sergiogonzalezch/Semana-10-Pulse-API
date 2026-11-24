@@ -34,8 +34,7 @@ logger = logging.getLogger("pulse_api.tasks")
 
 
 async def append_line(path: Path, line: str) -> None:
-    # La carpeta se crea si no existe (la Fase 5 la mueve al arranque)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    # La carpeta ya existe: la crea el lifespan al arrancar
     # "a": agrega al final sin borrar lo que había
     async with aiofiles.open(path, "a", encoding="utf-8") as file:
         await file.write(line + "\n")

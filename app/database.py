@@ -3,6 +3,7 @@ Engine asíncrono, fábrica de sesiones y dependencia get_db.
 """
 from collections.abc import AsyncGenerator
 
+# text para el SELECT del arranque
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -34,11 +35,17 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
-async def check_db() -> bool:
-    """Health check: SELECT 1 sin exponer detalles."""
+async def check_database() -> str:
+    """Pide la versión a PostgreSQL. Si no contesta, el arranque falla (fail fast)."""
     try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
+        # Una conexión del pool, la consulta más barata que dice algo útil, y se devuelve
+        async with engine.connect() as connection:
+            version = (await connection.execute(text("SELECT version()"))).scalar_one()
+    # Sin servidor, puerto equivocado, contraseña mala: OSError, SQLAlchemyError
+    # o el error directo de asyncpg que a veces sube sin envolver
+    except Exception as exc:
+        # Solo host, puerto y base: la URL completa lleva la contraseña
+        where = settings.DATABASE_URL.rsplit("@", 1)[-1]
+        raise RuntimeError(f"No hay conexión con PostgreSQL en {where}: {exc}") from exc
+    # "PostgreSQL 17.9 ..." -> hasta antes de " on "
+    return version.split(" on ")[0]

@@ -39,9 +39,8 @@ async def save_image(file: UploadFile) -> str:
         )
     # 3. Un nombre nuevo: nunca el del cliente (podría ser ../../app/main.py)
     filename = f"{uuid.uuid4().hex}{extension}"
+    # La carpeta ya existe: la crea el lifespan al arrancar
     path = settings.upload_dir / filename
-    # La carpeta se crea si no existe (la Fase 5 la mueve al arranque)
-    settings.upload_dir.mkdir(parents=True, exist_ok=True)
     # 4. El tamaño se cuenta mientras se escribe, chunk por chunk
     size = 0
     try:
