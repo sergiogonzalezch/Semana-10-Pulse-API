@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Pulse · notificaciones en vivo</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; margin: 2rem; max-width: 760px; }
+    label { display: block; margin: .5rem 0; }
+    input { padding: .4rem; width: 20rem; }
+    button { padding: .5rem 1rem; cursor: pointer; }
+    pre { background: #101418; color: #d8f3dc; padding: 1rem; min-height: 18rem; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>Pulse · notificaciones en vivo</h1>
+  <label>Usuario <input id="username" value="admin" autocomplete="username"></label>
+  <label>Contraseña <input id="password" type="password" value="pulse-dev-2026" autocomplete="current-password"></label>
+  <button id="login">Conectar</button>
+  <pre id="log"></pre>
+  <script>
+    const log = document.getElementById('log');
+    const print = (value) => {
+      log.textContent += `${new Date().toISOString()} ${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`;
+    };
+
+    async function login() {
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const response = await fetch('/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ username, password })
+      });
+      if (!response.ok) {
+        throw new Error(`login ${response.status}: ${await response.text()}`);
+      }
+      const data = await response.json();
+      connect(data.access_token);
+    }
+
+    function connect(token) {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${protocol}//${location.host}/api/v1/ws/notifications?token=${encodeURIComponent(token)}`;
+      const socket = new WebSocket(url);
+      socket.onopen = () => print('WebSocket abierto');
+      socket.onmessage = (event) => {
+        const message = JSON.parse(event.data);
+        print(message);
+        if (message.type === 'connected') {
+          socket.send('ping');
+        }
+      };
+      socket.onerror = () => print('Error de WebSocket');
+      socket.onclose = (event) => print(`WebSocket cerrado (${event.code})`);
+    }
+
+    document.getElementById('login').addEventListener('click', () => {
+      login().catch((error) => print(String(error)));
+    });
+  </script>
+</body>
+</html>

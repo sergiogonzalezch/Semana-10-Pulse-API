@@ -1,0 +1,22 @@
+# El nombre del proyecto y la versión mínima de Python
+[project]
+name = "pulse-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+# Lo que necesita la app: Alembic, el driver async, FastAPI, bcrypt (pwdlib),
+# la configuración en .env (pydantic-settings), los JWT (pyjwt) y SQLAlchemy 2.0
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
+    "fastapi[standard]>=0.141.1",
+    "pwdlib[bcrypt]>=0.3.1",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.15.1",
+    "sqlalchemy[asyncio]>=2.0.54,<2.1",
+]
+
+# Solo para desarrollo: httpx, el cliente del recorrido
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]
