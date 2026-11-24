@@ -63,7 +63,12 @@ app.add_middleware(RequestLoggingMiddleware)
 
 @app.exception_handler(PulseError)
 async def pulse_error_handler(request: Request, exc: PulseError) -> JSONResponse:
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    content: dict[str, object] = {"detail": exc.detail}
+    # Los errores de archivos añaden su código para que el cliente distinga 413 de 415
+    if getattr(exc, "error_code", None):
+        content["error_code"] = exc.error_code
+        content["status_code"] = exc.status_code
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 @app.exception_handler(IntegrityError)

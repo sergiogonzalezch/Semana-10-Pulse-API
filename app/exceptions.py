@@ -22,6 +22,28 @@ class PulseError(Exception):
         super().__init__(detail)
 
 
+# El error de dominio para el 415
+class UnsupportedMediaTypeError(PulseError):
+    """415: el archivo no es de un tipo que aceptamos (o dice ser algo que no es)."""
+
+    # El código que viaja en el JSON de error
+    error_code = "UNSUPPORTED_MEDIA_TYPE"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(415, detail)
+
+
+# El error de dominio para el 413
+class FileTooLargeError(PulseError):
+    """413: el archivo pasa del tamaño máximo."""
+
+    # El código que viaja en el JSON de error
+    error_code = "FILE_TOO_LARGE"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(413, detail)
+
+
 class NotFoundError(PulseError):
     """404 de dominio con un mensaje legible para entidad e id."""
 

@@ -5,7 +5,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    computed_field,
+    field_validator,
+)
 
 from app.models.post import PostStatus
 from app.schemas.category import CategoryResponse
@@ -62,6 +69,15 @@ class PostResponse(BaseModel):
     author: UserResponse
     category: CategoryResponse | None
     tags: list[TagSummary]
+    # El nombre del archivo se lee del modelo, pero no sale en el JSON (exclude=True)
+    image_filename: str | None = Field(default=None, exclude=True)
+
+    # Lo que sí sale: la URL de la imagen, o null si el post no tiene
+    @computed_field
+    @property
+    def image_url(self) -> str | None:
+        # La ruta que la sirve; el nombre del archivo en disco no se expone
+        return f"/api/v1/posts/{self.id}/image" if self.image_filename else None
 
 
 class PostPage(BaseModel):

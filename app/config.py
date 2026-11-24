@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Los eventos de analytics, una línea JSON por evento
     analytics_path: Path = Path("var/analytics.log")
 
+    # Las imágenes de los posts (Week 10): la carpeta y el tamaño máximo (5 MB)
+    upload_dir: Path = Path("var/uploads")
+    max_image_bytes: int = 5 * 1024 * 1024
+
     @field_validator("DATABASE_URL")
     @classmethod
     def require_asyncpg(cls, v: str) -> str:

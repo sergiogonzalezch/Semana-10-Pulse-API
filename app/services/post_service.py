@@ -3,17 +3,26 @@ Reglas de posts: visibilidad de borradores, autoría y relaciones.
 """
 from __future__ import annotations
 
+# csv e io arman cada línea del CSV; Path y AsyncIterator para los tipos
+import csv
+import io
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from pathlib import Path
 
+# UploadFile: el archivo que llega en el formulario
+from fastapi import UploadFile
 from sqlalchemy.exc import IntegrityError
 
-from app.exceptions import PulseError, raise_duplicate
+from app.exceptions import NotFoundError, PulseError, raise_duplicate
 from app.models import Post, PostStatus, User, UserRole
 from app.permissions import can_view_post, ensure_owner_or_admin
 from app.repositories.category_repo import CategoryRepository
 from app.repositories.post_repo import PostRepository
 from app.repositories.tag_repo import TagRepository
 from app.schemas.post import PostCreate, PostUpdate
+# Guardar, ubicar y borrar las imágenes en disco
+from app.storage import delete_image, image_path, save_image
 
 
 class PostService:
@@ -147,3 +156,59 @@ class PostService:
         ensure_owner_or_admin(post, current_user)
         await self.posts.db.delete(post)
         await self.posts.db.commit()
+        # La fila ya no existe: su imagen en disco tampoco sirve
+        if post.image_filename:
+            delete_image(post.image_filename)
+
+    async def set_image(self, post_id: int, file: UploadFile, current_user: User) -> Post:
+        """Guarda la imagen nueva del post y borra la anterior. Solo el autor o un admin."""
+        # Primero el post visible (404), después la propiedad (403), y al final el archivo
+        post = await self.get(post_id, current_user)
+        ensure_owner_or_admin(post, current_user)
+        filename = await save_image(file)  # 415 o 413 si no sirve
+        # La anterior se recuerda para borrarla cuando la nueva ya esté guardada
+        previous = post.image_filename
+        post.image_filename = filename
+        try:
+            await self.posts.save(post)
+            await self.posts.db.commit()
+        # Si la base falla, el archivo nuevo quedaría huérfano: se borra
+        except Exception:
+            delete_image(filename)
+            raise
+        # El commit pasó: ahora sí, fuera la vieja
+        if previous:
+            delete_image(previous)
+        # El post recargado, con su image_url
+        return await self.get(post_id, current_user)
+
+    async def get_image_path(self, post_id: int, viewer: User | None) -> Path:
+        # La imagen de un borrador ajeno tampoco se ve (404)
+        post = await self.get(post_id, viewer)
+        # Un post sin imagen: 404
+        if post.image_filename is None:
+            raise NotFoundError("La imagen del post", post_id)
+        return image_path(post.image_filename)
+
+    async def export_csv(self, viewer: User | None) -> AsyncIterator[str]:
+        """El CSV de los posts que puedes ver, línea por línea: un async generator."""
+        # La misma visibilidad que list_all: admin todo, los demás publicados + los suyos
+        if viewer is not None and viewer.role == UserRole.admin:
+            drafts_of = None
+        else:
+            drafts_of = viewer.id if viewer is not None else 0
+        # csv.writer pone comillas donde hacen falta (un título con comas)
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        # El encabezado es la primera línea que sale
+        writer.writerow(["id", "slug", "title", "status", "published_at", "author"])
+        # Cada fila se escribe en el buffer, se entrega y el buffer se vacía
+        async for row in self.posts.stream_for_export(drafts_of):
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate()
+            # La fecha en ISO 8601; un borrador no tiene
+            published = row.published_at.isoformat() if row.published_at else ""
+            writer.writerow([row.id, row.slug, row.title, row.status, published, row.author])
+        # La última fila que quedó en el buffer
+        yield buffer.getvalue()

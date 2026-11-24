@@ -3,13 +3,15 @@ Acceso a posts. Flush, nunca commit.
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime
 
-from sqlalchemy import func, select
+# Row es una fila de resultados
+from sqlalchemy import Row, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import Post, PostStatus, post_tags
+from app.models import Post, PostStatus, User, post_tags
 
 
 class PostRepository:
@@ -100,3 +102,32 @@ class PostRepository:
         self.db.add(post)
         await self.db.flush()
         return post
+
+    async def save(self, post: Post) -> Post:
+        self.db.add(post)
+        await self.db.flush()
+        return post
+
+    async def stream_for_export(self, drafts_of: int | None) -> AsyncIterator[Row]:
+        """Las filas del export, de a poco: un cursor del lado del servidor, no una lista."""
+        # Solo las columnas del CSV, con el username del autor (un JOIN, sin objetos Post)
+        stmt = (
+            select(
+                Post.id,
+                Post.slug,
+                Post.title,
+                Post.status,
+                Post.published_at,
+                User.username.label("author"),
+            )
+            .join(Post.author)
+            .order_by(Post.id)
+            # PostgreSQL las manda de 100 en 100; Python nunca tiene todas a la vez
+            .execution_options(yield_per=100)
+        )
+        # La misma regla de visibilidad que el listado: publicados + tus borradores
+        if drafts_of is not None:
+            stmt = stmt.where(or_(Post.status == PostStatus.published, Post.author_id == drafts_of))
+        result = await self.db.stream(stmt)
+        async for row in result:
+            yield row

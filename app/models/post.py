@@ -48,6 +48,9 @@ class Post(Base, TimestampMixin):
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL"), nullable=True
     )
+    # El nombre del archivo de su imagen en var/uploads (un uuid + .jpg/.png), o NULL.
+    # En la base va el nombre, nunca los bytes: el archivo vive en disco.
+    image_filename: Mapped[str | None] = mapped_column(String(64))
 
     author: Mapped["User"] = relationship(back_populates="posts")
     category: Mapped["Category | None"] = relationship(back_populates="posts")
