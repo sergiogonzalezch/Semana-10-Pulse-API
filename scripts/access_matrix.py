@@ -1,5 +1,11 @@
-"""scripts/access_matrix.py
-Matriz rápida de accesos por rol para comprobar la autorización.
+"""Matriz rápida de accesos por rol para comprobar la autorización.
+
+Manda más requests por minuto que el límite del rate limiter: levanta la API con límites altos.
+1. Arranca la API (PowerShell):
+   $env:RATE_LIMIT_PER_MINUTE = 1000
+   $env:LOGIN_RATE_LIMIT_PER_MINUTE = 1000
+   uv run uvicorn app.main:app
+2. En otra terminal: uv run python -m scripts.access_matrix
 """
 from __future__ import annotations
 

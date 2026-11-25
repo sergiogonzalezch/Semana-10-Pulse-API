@@ -1,12 +1,26 @@
-"""scripts/walkthrough.py
-Recorrido de 46 pasos: auth, roles, usuarios, categorías, posts y comentarios.
+"""Recorrido completo de la API: auth, roles, usuarios, categorías, posts, comentarios,
+WebSocket, notificaciones, imágenes y export CSV. Crea sus datos y los borra al final.
+
+Manda más requests por minuto que el límite del rate limiter: levanta la API con límites altos.
+1. Arranca la API (PowerShell):
+   $env:RATE_LIMIT_PER_MINUTE = 1000
+   $env:LOGIN_RATE_LIMIT_PER_MINUTE = 1000
+   uv run uvicorn app.main:app
+2. En otra terminal: uv run python -m scripts.walkthrough
 """
 from __future__ import annotations
 
+import base64
+import json
 import os
+import struct
+import zlib
+from collections.abc import Callable
 from typing import Any
 
 import httpx
+from websockets.exceptions import InvalidStatus
+from websockets.sync.client import connect
 
 BASE_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 DEV_PASSWORD = os.getenv("WALKTHROUGH_PASSWORD", "pulse-dev-2026")
@@ -20,17 +34,31 @@ ids: dict[str, int] = {}
 count = 0
 
 
-def step(description: str, response: httpx.Response, expected: int) -> httpx.Response:
+def record(
+    description: str, status: object, expected: object, detail: str = ""
+) -> None:
     global count
     count += 1
-    ok = response.status_code == expected
+    ok = status == expected
     print(
-        f"[{count:02d}/46] {'OK ' if ok else 'BAD'} {description}: "
-        f"{response.status_code} (esperado {expected})"
+        f"[{count:02d}] {'OK ' if ok else 'BAD'} {description}: "
+        f"{status} (esperado {expected}) {detail}".rstrip()
     )
-    if not ok:
+
+
+def step(
+    description: str,
+    response: httpx.Response,
+    expected: int,
+    detail: Callable[[httpx.Response], str] | None = None,
+) -> httpx.Response:
+    extra = detail(response) if detail else ""
+    record(description, response.status_code, expected, extra)
+    if response.status_code != expected:
         print(response.text[:500])
-    assert ok, f"{description}: esperado {expected}, obtenido {response.status_code}"
+    assert response.status_code == expected, (
+        f"{description}: esperado {expected}, obtenido {response.status_code}"
+    )
     return response
 
 
@@ -45,6 +73,59 @@ def login(email: str) -> dict[str, Any]:
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def forged(token: str) -> str:
+    """El mismo token con un claim cambiado y la firma original: no debe entrar."""
+    header, payload, signature = token.split(".")
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    claims["role"] = "admin"
+    changed = base64.urlsafe_b64encode(
+        json.dumps(claims, separators=(",", ":")).encode()
+    ).rstrip(b"=").decode()
+    return f"{header}.{changed}.{signature}"
+
+
+def ws_url(token: str) -> str:
+    """http:// se vuelve ws://; el access token va en la query string."""
+    return BASE_URL.replace("http", "ws", 1) + f"/api/v1/ws/notifications?token={token}"
+
+
+def ws_hello(description: str, websocket: Any) -> None:
+    hello = json.loads(websocket.recv(timeout=5))
+    record(description, hello.get("type"), "connected", f"unread={hello.get('unread')}")
+
+
+def ws_receive(description: str, websocket: Any) -> None:
+    message = json.loads(websocket.recv(timeout=5))
+    data = message.get("data", {})
+    detail = f"kind={data.get('kind')} de {data.get('actor', {}).get('username')}"
+    record(description, message.get("type"), "notification", detail)
+
+
+def ws_rejected(description: str, token: str) -> None:
+    try:
+        with connect(ws_url(token)):
+            status = "conectado"
+    except InvalidStatus as exc:
+        status = f"rechazado HTTP {exc.response.status_code}"
+    record(description, status, "rechazado HTTP 403")
+
+
+def tiny_png() -> bytes:
+    """Un PNG real de 1x1 píxel: firma, IHDR, IDAT e IEND."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data))
+        )
+
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    pixels = zlib.compress(b"\x00\xff\x00\x00")
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixels) + chunk(b"IEND", b"")
 
 
 def main() -> None:
@@ -228,6 +309,103 @@ def main() -> None:
         200,
     )
 
+    # Tiempo real: el author escucha, el reader comenta y el aviso llega por WebSocket.
+    step(
+        "publicar post creado",
+        client.patch(
+            f"/posts/{ids['new_post']}",
+            json={"status": "published"},
+            headers=bearer("author"),
+        ),
+        200,
+    )
+    png = tiny_png()
+    with connect(ws_url(tokens["author"])) as author_ws:
+        ws_hello("WS saludo author", author_ws)
+        step(
+            "reader comenta el post del author",
+            client.post(
+                f"/posts/{ids['new_post']}/comments",
+                json={"body": "Comentario con notificación en vivo."},
+                headers=bearer("reader"),
+            ),
+            201,
+        )
+        ws_receive("WS notificación", author_ws)
+
+    notifications = step(
+        "notificaciones del author",
+        client.get("/notifications", headers=bearer("author")),
+        200,
+    )
+    notification = next(
+        (
+            item
+            for item in notifications.json()["items"]
+            if item["post_id"] == ids["new_post"]
+        ),
+        None,
+    )
+    assert notification is not None, "el comentario no creó la notificación"
+    ids["notification"] = notification["id"]
+    step(
+        "marcar notificación ajena",
+        client.put(
+            f"/notifications/{ids['notification']}/read", headers=bearer("reader")
+        ),
+        404,
+    )
+    step(
+        "marcar notificación leída",
+        client.put(
+            f"/notifications/{ids['notification']}/read", headers=bearer("author")
+        ),
+        200,
+    )
+    ws_rejected("WS con token adulterado", forged(tokens["reader"]))
+
+    # Imágenes: solo el dueño, JPEG/PNG de verdad, y descarga pública del post publicado.
+    step(
+        "subir imagen sin ser dueño",
+        client.post(
+            f"/posts/{ids['new_post']}/image",
+            files={"file": ("cover.png", png, "image/png")},
+            headers=bearer("reader"),
+        ),
+        403,
+    )
+    step(
+        "subir imagen falsa",
+        client.post(
+            f"/posts/{ids['new_post']}/image",
+            files={"file": ("fake.png", b"not an image", "image/png")},
+            headers=bearer("author"),
+        ),
+        415,
+    )
+    step(
+        "subir imagen PNG",
+        client.post(
+            f"/posts/{ids['new_post']}/image",
+            files={"file": ("cover.png", png, "image/png")},
+            headers=bearer("author"),
+        ),
+        200,
+        detail=lambda r: f"image_url={r.json().get('image_url')}",
+    )
+    step(
+        "descargar imagen",
+        client.get(f"/posts/{ids['new_post']}/image"),
+        200,
+        detail=lambda r: f"{r.headers.get('content-type')} {len(r.content)} bytes",
+    )
+    step(
+        "exportar CSV",
+        client.get("/posts/export"),
+        200,
+        detail=lambda r: f"{len(r.text.splitlines())} líneas",
+    )
+
     admin_posts = step(
         "list posts admin",
         client.get(f"/posts?author_id={ids['admin']}", headers=bearer("admin")),
@@ -327,18 +505,18 @@ def main() -> None:
     )
     traced = step(
         "health con request id",
-        client.get("/health", headers={"X-Request-ID": "walkthrough-46"}),
+        client.get("/health", headers={"X-Request-ID": "walkthrough-70"}),
         200,
     )
-    assert traced.headers.get("X-Request-ID") == "walkthrough-46"
+    assert traced.headers.get("X-Request-ID") == "walkthrough-70"
     step(
         "delete post author",
         client.delete(f"/posts/{ids['new_post']}", headers=bearer("author")),
         204,
     )
 
-    assert count == 46, f"El recorrido tiene {count} pasos, no 46"
-    print(f"\nRecorrido completado: {count}/46 pasos correctos.")
+    assert count == 70, f"El recorrido tiene {count} pasos, no 70"
+    print(f"\nRecorrido completado: {count}/70 pasos correctos.")
 
 
 if __name__ == "__main__":

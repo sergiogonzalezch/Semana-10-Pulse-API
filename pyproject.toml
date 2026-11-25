@@ -1,7 +1,7 @@
 # El nombre del proyecto y la versión mínima de Python
 [project]
 name = "pulse-api"
-version = "0.1.0"
+version = "0.3.0"
 requires-python = ">=3.12"
 # Lo que necesita la app: Alembic, el driver async, FastAPI, bcrypt (pwdlib),
 # la configuración en .env (pydantic-settings), los JWT (pyjwt) y SQLAlchemy 2.0

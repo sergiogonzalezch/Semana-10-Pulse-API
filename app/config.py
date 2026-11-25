@@ -2,6 +2,7 @@
 Configuración central con pydantic-settings: lee .env y valida los valores.
 """
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,6 +16,10 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    # Nombre y versión que muestran /docs y el health check
+    app_name: str = "Pulse API"
+    version: str = "0.3.0"
 
     DATABASE_URL: str = Field(
         default="postgresql+asyncpg://pulse:pulse@localhost:5432/pulse_blog"
@@ -36,6 +41,12 @@ class Settings(BaseSettings):
     # Las imágenes de los posts (Week 10): la carpeta y el tamaño máximo (5 MB)
     upload_dir: Path = Path("var/uploads")
     max_image_bytes: int = 5 * 1024 * 1024
+
+    # Middleware (Week 10). En producción, APP_ENV=production: los 500 no dan detalles.
+    app_env: Literal["development", "production"] = "development"
+    # Requests por minuto por IP: el general y el del login (fuerza bruta)
+    rate_limit_per_minute: int = 30
+    login_rate_limit_per_minute: int = 5
 
     @field_validator("DATABASE_URL")
     @classmethod
